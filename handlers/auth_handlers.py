@@ -132,7 +132,7 @@ async def login_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     session["email"] = bytearray(email.encode("utf-8"))
     session["password"] = bytearray(password.encode("utf-8"))
     if totp_secret:
-        session["totp_secret"] = totp_secret
+        session["totp_secret"] = bytearray(totp_secret.encode("utf-8"))
     session["device"] = create_device_profile()
     session["offer_link"] = None
     session["created_at"] = time.time()

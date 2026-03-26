@@ -33,7 +33,7 @@ def clear_session(chat_id: int) -> None:
     if session is None:
         return
 
-    for key in ("password", "email"):
+    for key in ("password", "email", "totp_secret"):
         val = session.get(key)
         if isinstance(val, bytearray):
             secure_wipe(val)

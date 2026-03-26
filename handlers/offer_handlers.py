@@ -135,11 +135,12 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                     driver, status = await asyncio.to_thread(start_login, email_str, pw_str, device)
 
                     if status == "needs_totp":
-                        totp_secret = session.get("totp_secret")
-                        if totp_secret:
+                        totp_secret_buf = session.get("totp_secret")
+                        if isinstance(totp_secret_buf, bytearray) and totp_secret_buf:
                             try:
                                 import pyotp
 
+                                totp_secret = bytes(totp_secret_buf).decode("utf-8")
                                 code = pyotp.TOTP(totp_secret).now()
                                 logger.info(
                                     "Auto-generated TOTP code for chat %s (attempt %d)",
@@ -234,6 +235,11 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             secure_wipe(pw)
         session.pop("password", None)
 
+        totp = session.get("totp_secret")
+        if isinstance(totp, bytearray):
+            secure_wipe(totp)
+        session.pop("totp_secret", None)
+
     if not offer_link:
         await update.message.reply_text(
             f"❌ No Gemini Pro offer found after {max_offer_attempts} attempts.\n\n"
@@ -309,6 +315,11 @@ async def handle_2fa_code(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if isinstance(pw, bytearray):
             secure_wipe(pw)
         session.pop("password", None)
+
+        totp = session.get("totp_secret")
+        if isinstance(totp, bytearray):
+            secure_wipe(totp)
+        session.pop("totp_secret", None)
 
     await _report_offer(chat_id, context, session, offer_link)
     return ConversationHandler.END
