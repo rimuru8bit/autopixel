@@ -1,6 +1,7 @@
 """Offer detection and 2FA-related handlers."""
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -30,10 +31,25 @@ from services.google_automation import (
     submit_2fa_code,
 )
 
-from handlers.states import AWAIT_2FA_CODE
+from handlers.states import AWAIT_2FA_CODE, AWAIT_COOKIE_JSON
 from handlers.ui import main_menu_keyboard, quick_actions_inline_keyboard
 
 logger = logging.getLogger(__name__)
+
+
+async def _delete_message_later(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Delete a message after scheduled delay."""
+    job = context.job
+    if not job:
+        return
+    data = job.data or {}
+    chat_id = data.get("chat_id")
+    message_id = data.get("message_id")
+    if chat_id and message_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            pass
 
 
 async def _report_offer(update_or_chat_id, context, session, offer_link) -> None:
@@ -87,15 +103,25 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     chat_id = update.effective_chat.id
     session = get_session(chat_id)
 
-    use_cookie_mode = bool(config.GOOGLE_COOKIES_JSON.strip())
+    session_cookie_buf = session.get("cookies_json")
+    session_cookie_json = (
+        bytes(session_cookie_buf).decode("utf-8")
+        if isinstance(session_cookie_buf, bytearray) and session_cookie_buf
+        else ""
+    )
+    env_cookie_json = config.GOOGLE_COOKIES_JSON.strip()
+    active_cookie_json = session_cookie_json or env_cookie_json
+
+    use_cookie_mode = bool(active_cookie_json)
     has_credentials = bool(session.get("email") and session.get("password"))
 
     if not has_credentials and not use_cookie_mode:
         await update.message.reply_text(
-            "⚠️ No credentials/cookies found. Run /login first or set GOOGLE_COOKIES_JSON.",
+            "🍪 No cookies found. Please send GOOGLE_COOKIES_JSON now as a single message.\n"
+            "You can /cancel anytime. Your cookie message will be auto-deleted after 1 minute.",
             reply_markup=main_menu_keyboard(),
         )
-        return ConversationHandler.END
+        return AWAIT_COOKIE_JSON
 
     last_check = LAST_CHECK_TIME.get(chat_id, 0)
     elapsed = time.time() - last_check
@@ -143,7 +169,7 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 driver = None
                 try:
                     if use_cookie_mode:
-                        driver = await asyncio.to_thread(start_with_cookies, config.GOOGLE_COOKIES_JSON, device)
+                        driver = await asyncio.to_thread(start_with_cookies, active_cookie_json, device)
                         await update.message.reply_text(
                             f"✅ Cookie session restored ({attempt}/{max_offer_attempts}).\n"
                             "Checking Gemini Pro offer now..."
@@ -274,6 +300,41 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return ConversationHandler.END
 
 
+async def handle_cookie_json(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Capture cookie JSON from chat, schedule message deletion, then run check_offer."""
+    chat_id = update.effective_chat.id
+    session = get_session(chat_id)
+    raw = (update.message.text or "").strip()
+
+    # Auto-delete cookie message after 1 minute.
+    if context.job_queue and update.message:
+        context.job_queue.run_once(
+            _delete_message_later,
+            when=60,
+            data={"chat_id": chat_id, "message_id": update.message.message_id},
+            name=f"delete-cookie-msg:{chat_id}:{update.message.message_id}",
+        )
+
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list) or not parsed:
+            raise ValueError("Cookie JSON must be a non-empty JSON array")
+    except Exception:
+        await update.message.reply_text(
+            "⚠️ Invalid cookie JSON. Send a non-empty JSON array of cookies or /cancel.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return AWAIT_COOKIE_JSON
+
+    session["cookies_json"] = bytearray(raw.encode("utf-8"))
+
+    await update.message.reply_text(
+        "✅ Cookies received. Running /check_offer now...",
+        reply_markup=main_menu_keyboard(),
+    )
+    return await check_offer(update, context)
+
+
 async def handle_2fa_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle the TOTP code submitted by the user during 2FA."""
     chat_id = update.effective_chat.id
@@ -344,13 +405,13 @@ async def handle_2fa_code(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def cancel_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel 2FA input and close the driver."""
+    """Cancel offer-related input (2FA/cookies) and close the driver."""
     chat_id = update.effective_chat.id
     session = get_session(chat_id)
     driver = session.pop("_driver", None)
     close_driver(driver)
     await update.message.reply_text(
-        "❌ 2FA input cancelled.",
+        "❌ Input cancelled.",
         reply_markup=main_menu_keyboard(),
     )
     return ConversationHandler.END

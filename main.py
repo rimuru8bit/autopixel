@@ -29,12 +29,14 @@ from telegram.ext import (
 import config
 from handlers.bot_handlers import (
     AWAIT_2FA_CODE,
+    AWAIT_COOKIE_JSON,
     AWAIT_EMAIL,
     AWAIT_PASSWORD,
     cancel_2fa,
     check_offer,
     get_link,
     handle_2fa_code,
+    handle_cookie_json,
     lang_en,
     lang_id,
     login_cancel,
@@ -109,6 +111,9 @@ def main() -> None:
         states={
             AWAIT_2FA_CODE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_2fa_code)
+            ],
+            AWAIT_COOKIE_JSON: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_cookie_json)
             ],
             ConversationHandler.TIMEOUT: [
                 MessageHandler(filters.ALL, offer_timeout)

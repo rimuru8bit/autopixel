@@ -13,6 +13,7 @@ from handlers.auth_handlers import (
 from handlers.offer_handlers import (
     check_offer,
     handle_2fa_code,
+    handle_cookie_json,
     cancel_2fa,
     offer_timeout,
 )
@@ -21,7 +22,7 @@ from handlers.session_handlers import (
     status,
     session_cleanup_job,
 )
-from handlers.states import AWAIT_EMAIL, AWAIT_PASSWORD, AWAIT_2FA_CODE
+from handlers.states import AWAIT_EMAIL, AWAIT_PASSWORD, AWAIT_2FA_CODE, AWAIT_COOKIE_JSON
 
 __all__ = [
     "start",
@@ -34,6 +35,7 @@ __all__ = [
     "logout",
     "check_offer",
     "handle_2fa_code",
+    "handle_cookie_json",
     "cancel_2fa",
     "offer_timeout",
     "get_link",
@@ -42,4 +44,5 @@ __all__ = [
     "AWAIT_EMAIL",
     "AWAIT_PASSWORD",
     "AWAIT_2FA_CODE",
+    "AWAIT_COOKIE_JSON",
 ]
