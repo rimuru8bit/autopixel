@@ -1,7 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
-.env
 *.egg-info/
 dist/
 build/
@@ -15,3 +14,39 @@ venv/
 # Logs
 *.log
 logs/
+
+# Sensitive env/secret files
+.env
+.env.*
+!.env.example
+*.env
+*.secret
+*.secrets
+secrets/
+secret/
+
+# Keys / certs
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Cookie/session/token dumps
+cookies.json
+cookie.json
+*cookies*.json
+session.json
+sessions.json
+session_store.json
+token.json
+tokens.json
+auth.json
+credentials.json
+
+# Local runtime artifacts
+*.sqlite
+*.sqlite3
+*.db
