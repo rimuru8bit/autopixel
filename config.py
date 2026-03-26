@@ -7,6 +7,11 @@ import os
 # ── Telegram ──────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
+# Optional: JSON array of browser cookies to restore an authenticated Google session.
+# Example:
+# GOOGLE_COOKIES_JSON='[{"name":"SID","value":"...","domain":".google.com","path":"/","secure":true,"httpOnly":true}]'
+GOOGLE_COOKIES_JSON = os.environ.get("GOOGLE_COOKIES_JSON", "")
+
 # ── Device specs – Google Pixel 10 Pro (Android 16) ──────────────────────────
 DEVICE_MODEL = "Pixel 10 Pro"
 DEVICE_BRAND = "google"

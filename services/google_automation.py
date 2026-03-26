@@ -11,6 +11,7 @@ from services.google_automation_core.errors import GoogleAutomationError
 __all__ = [
     "GoogleAutomationError",
     "start_login",
+    "start_with_cookies",
     "submit_2fa_code",
     "check_offer_with_driver",
     "close_driver",

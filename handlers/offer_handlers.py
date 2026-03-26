@@ -5,6 +5,8 @@ import logging
 import random
 import time
 
+import config
+
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -24,6 +26,7 @@ from services.google_automation import (
     check_offer_with_driver,
     close_driver,
     start_login,
+    start_with_cookies,
     submit_2fa_code,
 )
 
@@ -84,9 +87,12 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     chat_id = update.effective_chat.id
     session = get_session(chat_id)
 
-    if not session.get("email") or not session.get("password"):
+    use_cookie_mode = bool(config.GOOGLE_COOKIES_JSON.strip())
+    has_credentials = bool(session.get("email") and session.get("password"))
+
+    if not has_credentials and not use_cookie_mode:
         await update.message.reply_text(
-            "⚠️ No credentials found. Run /login first.",
+            "⚠️ No credentials/cookies found. Run /login first or set GOOGLE_COOKIES_JSON.",
             reply_markup=main_menu_keyboard(),
         )
         return ConversationHandler.END
@@ -110,15 +116,19 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     await update.message.reply_text(
         "⏳ Starting secure check...\n"
-        "Launching Pixel 10 Pro simulation and signing in.\n"
-        "This usually takes up to 60 seconds."
+        + (
+            "Launching Pixel 10 Pro simulation and restoring cookie session.\n"
+            if use_cookie_mode
+            else "Launching Pixel 10 Pro simulation and signing in.\n"
+        )
+        + "This usually takes up to 60 seconds."
     )
 
     offer_link = None
     try:
         async with CHROME_SEMAPHORE:
-            email_str = bytes(session["email"]).decode("utf-8")
-            pw_str = bytes(session["password"]).decode("utf-8")
+            email_str = bytes(session["email"]).decode("utf-8") if has_credentials else ""
+            pw_str = bytes(session["password"]).decode("utf-8") if has_credentials else ""
 
             for attempt in range(1, max_offer_attempts + 1):
                 device = create_device_profile()
@@ -132,61 +142,69 @@ async def check_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
                 driver = None
                 try:
-                    driver, status = await asyncio.to_thread(start_login, email_str, pw_str, device)
+                    if use_cookie_mode:
+                        driver = await asyncio.to_thread(start_with_cookies, config.GOOGLE_COOKIES_JSON, device)
+                        await update.message.reply_text(
+                            f"✅ Cookie session restored ({attempt}/{max_offer_attempts}).\n"
+                            "Checking Gemini Pro offer now..."
+                        )
+                        offer_link = await asyncio.to_thread(check_offer_with_driver, driver)
+                    else:
+                        driver, status = await asyncio.to_thread(start_login, email_str, pw_str, device)
 
-                    if status == "needs_totp":
-                        totp_secret_buf = session.get("totp_secret")
-                        if isinstance(totp_secret_buf, bytearray) and totp_secret_buf:
-                            try:
-                                import pyotp
+                        if status == "needs_totp":
+                            totp_secret_buf = session.get("totp_secret")
+                            if isinstance(totp_secret_buf, bytearray) and totp_secret_buf:
+                                try:
+                                    import pyotp
 
-                                totp_secret = bytes(totp_secret_buf).decode("utf-8")
-                                code = pyotp.TOTP(totp_secret).now()
-                                logger.info(
-                                    "Auto-generated TOTP code for chat %s (attempt %d)",
-                                    chat_id,
-                                    attempt,
-                                )
-                                accepted = await asyncio.to_thread(submit_2fa_code, driver, code)
-                                if not accepted:
+                                    totp_secret = bytes(totp_secret_buf).decode("utf-8")
+                                    code = pyotp.TOTP(totp_secret).now()
+                                    logger.info(
+                                        "Auto-generated TOTP code for chat %s (attempt %d)",
+                                        chat_id,
+                                        attempt,
+                                    )
+                                    accepted = await asyncio.to_thread(submit_2fa_code, driver, code)
+                                    if not accepted:
+                                        close_driver(driver)
+                                        driver = None
+                                        await update.message.reply_text(
+                                            "❌ Auto-generated TOTP code was rejected. "
+                                            "Please check your TOTP secret key.",
+                                            reply_markup=main_menu_keyboard(),
+                                        )
+                                        return ConversationHandler.END
+
+                                    await update.message.reply_text(
+                                        f"✅ Login successful ({attempt}/{max_offer_attempts}).\n"
+                                        "Checking Gemini Pro offer now..."
+                                    )
+                                    offer_link = await asyncio.to_thread(check_offer_with_driver, driver)
+                                except Exception as exc:
+                                    logger.warning("Auto-TOTP failed: %s", exc)
                                     close_driver(driver)
                                     driver = None
                                     await update.message.reply_text(
-                                        "❌ Auto-generated TOTP code was rejected. "
+                                        f"❌ Auto-TOTP error: {exc}\n"
                                         "Please check your TOTP secret key.",
                                         reply_markup=main_menu_keyboard(),
                                     )
                                     return ConversationHandler.END
-
+                            else:
+                                session["_driver"] = driver
                                 await update.message.reply_text(
-                                    f"✅ Login successful ({attempt}/{max_offer_attempts}).\n"
-                                    "Checking Gemini Pro offer now..."
+                                    "🔐 *Two-Factor Authentication Required*\n\n"
+                                    "Please enter your 6-digit authenticator code.",
+                                    parse_mode="Markdown",
                                 )
-                                offer_link = await asyncio.to_thread(check_offer_with_driver, driver)
-                            except Exception as exc:
-                                logger.warning("Auto-TOTP failed: %s", exc)
-                                close_driver(driver)
-                                driver = None
-                                await update.message.reply_text(
-                                    f"❌ Auto-TOTP error: {exc}\n"
-                                    "Please check your TOTP secret key.",
-                                    reply_markup=main_menu_keyboard(),
-                                )
-                                return ConversationHandler.END
+                                return AWAIT_2FA_CODE
                         else:
-                            session["_driver"] = driver
                             await update.message.reply_text(
-                                "🔐 *Two-Factor Authentication Required*\n\n"
-                                "Please enter your 6-digit authenticator code.",
-                                parse_mode="Markdown",
+                                f"✅ Login successful ({attempt}/{max_offer_attempts}).\n"
+                                "Checking Gemini Pro offer now..."
                             )
-                            return AWAIT_2FA_CODE
-                    else:
-                        await update.message.reply_text(
-                            f"✅ Login successful ({attempt}/{max_offer_attempts}).\n"
-                            "Checking Gemini Pro offer now..."
-                        )
-                        offer_link = await asyncio.to_thread(check_offer_with_driver, driver)
+                            offer_link = await asyncio.to_thread(check_offer_with_driver, driver)
                 finally:
                     if driver:
                         close_driver(driver)
