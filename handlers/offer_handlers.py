@@ -400,6 +400,11 @@ async def handle_2fa_code(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             secure_wipe(totp)
         session.pop("totp_secret", None)
 
+        cookies_buf = session.get("cookies_json")
+        if isinstance(cookies_buf, bytearray):
+            secure_wipe(cookies_buf)
+        session.pop("cookies_json", None)
+
     await _report_offer(chat_id, context, session, offer_link)
     return ConversationHandler.END
 
